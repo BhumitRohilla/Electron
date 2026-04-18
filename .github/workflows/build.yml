@@ -27,6 +27,34 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Pillow for icon generation
+        run: pip install pillow
+
+      - name: Generate Windows icon from PNG
+        shell: python
+        run: |
+          from PIL import Image
+          import io, struct
+          img = Image.open('assets/icon.png').convert('RGBA')
+          sizes = [16, 32, 48, 64, 128, 256]
+          images = []
+          for s in sizes:
+              buf = io.BytesIO()
+              img.resize((s, s), Image.LANCZOS).save(buf, format='PNG')
+              images.append(buf.getvalue())
+          n = len(images)
+          header = struct.pack('<HHH', 0, 1, n)
+          dir_offset = 6 + n * 16
+          dirs, data, offset = b'', b'', dir_offset
+          for s, raw in zip(sizes, images):
+              w = s if s < 256 else 0
+              dirs += struct.pack('<BBBBHHII', w, w, 0, 0, 1, 32, len(raw), offset)
+              data += raw
+              offset += len(raw)
+          with open('assets/icon.ico', 'wb') as f:
+              f.write(header + dirs + data)
+          print('icon.ico written with sizes:', sizes)
+
       - name: Build Windows app
         run: npm run build:win
         env:
@@ -62,16 +90,13 @@ jobs:
       - name: Generate macOS icon from PNG
         run: |
           mkdir -p assets/icon.iconset
-          python3 -c "
-          from PIL import Image
-          import os
-          img = Image.open('assets/icon.png').convert('RGBA')
-          sizes = [16,32,64,128,256,512,1024]
-          for s in sizes:
-              img.resize((s,s), Image.LANCZOS).save(f'assets/icon.iconset/icon_{s}x{s}.png')
-              if s <= 512:
-                  img.resize((s*2,s*2), Image.LANCZOS).save(f'assets/icon.iconset/icon_{s}x{s}@2x.png')
-          "
+          for size in 16 32 64 128 256 512 1024; do
+            sips -z $size $size assets/icon.png --out assets/icon.iconset/icon_${size}x${size}.png
+          done
+          for size in 16 32 64 128 256 512; do
+            double=$((size * 2))
+            sips -z $double $double assets/icon.png --out assets/icon.iconset/icon_${size}x${size}@2x.png
+          done
           iconutil -c icns assets/icon.iconset -o assets/icon.icns
 
       - name: Build macOS app
